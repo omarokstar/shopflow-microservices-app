@@ -1,0 +1,123 @@
+version: '3.9'
+
+# Local environment orchestration for Shopflow microservices
+
+services:
+  # --- infrastructure ---
+  auth-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: authdb
+    ports: ["5433:5432"]
+    volumes: [auth-db-data:/var/lib/postgresql/data]
+
+  product-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: productdb
+    ports: ["5434:5432"]
+    volumes: [product-db-data:/var/lib/postgresql/data]
+
+  order-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: orderdb
+    ports: ["5435:5432"]
+    volumes: [order-db-data:/var/lib/postgresql/data]
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672" # management UI: http://localhost:15672  guest/guest
+
+  # --- application services ---
+  auth-service:
+    build:
+      context: .
+      dockerfile: apps/auth-service/Dockerfile
+    environment:
+      AUTH_SERVICE_PORT: 3001
+      AUTH_DB_HOST: auth-db
+      AUTH_DB_PORT: 5432
+      AUTH_DB_USER: postgres
+      AUTH_DB_PASSWORD: postgres
+      AUTH_DB_NAME: authdb
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+    depends_on: [auth-db]
+
+  product-service:
+    build:
+      context: .
+      dockerfile: apps/product-service/Dockerfile
+    environment:
+      PRODUCT_SERVICE_PORT: 3002
+      PRODUCT_DB_HOST: product-db
+      PRODUCT_DB_PORT: 5432
+      PRODUCT_DB_USER: postgres
+      PRODUCT_DB_PASSWORD: postgres
+      PRODUCT_DB_NAME: productdb
+    depends_on: [product-db]
+
+  order-service:
+    build:
+      context: .
+      dockerfile: apps/order-service/Dockerfile
+    environment:
+      ORDER_SERVICE_PORT: 3003
+      ORDER_DB_HOST: order-db
+      ORDER_DB_PORT: 5432
+      ORDER_DB_USER: postgres
+      ORDER_DB_PASSWORD: postgres
+      ORDER_DB_NAME: orderdb
+      PRODUCT_SERVICE_HOST: product-service
+      PRODUCT_SERVICE_PORT: 3002
+      RABBITMQ_URL: amqp://rabbitmq:5672
+    depends_on: [order-db, product-service, rabbitmq]
+
+  mailhog:
+    image: mailhog/mailhog
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # web UI: http://localhost:8025
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: apps/notification-service/Dockerfile
+    environment:
+      RABBITMQ_URL: amqp://rabbitmq:5672
+      SMTP_HOST: ${SMTP_HOST:-mailhog}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@shopflow.com}
+    depends_on: [rabbitmq, mailhog]
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: apps/api-gateway/Dockerfile
+    ports: ["3000:3000"]
+    environment:
+      GATEWAY_PORT: 3000
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      AUTH_SERVICE_HOST: auth-service
+      AUTH_SERVICE_PORT: 3001
+      PRODUCT_SERVICE_HOST: product-service
+      PRODUCT_SERVICE_PORT: 3002
+      ORDER_SERVICE_HOST: order-service
+      ORDER_SERVICE_PORT: 3003
+    depends_on: [auth-service, product-service, order-service]
+
+volumes:
+  auth-db-data:
+  product-db-data:
+  order-db-data:
